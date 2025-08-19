@@ -1,13 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   Dimensions,
+  Animated,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Play, Pause, RotateCcw, Volume2 } from 'lucide-react-native';
+import { Play, Pause, RotateCcw, Volume2, Brain, Zap, Activity, Waves } from 'lucide-react-native';
 
 const { width } = Dimensions.get('window');
 
@@ -17,23 +19,97 @@ export default function FocusTab() {
   const [timer, setTimer] = useState(0);
   const [sessions, setSessions] = useState(0);
 
+  // Animation refs
+  const circleAnim = useRef(new Animated.Value(1)).current;
+  const glowAnim = useRef(new Animated.Value(0)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  // 🔹 Load sessions (sekali saat mount) + migrasi dari key lama
   useEffect(() => {
-    let interval: NodeJS.Timeout;
-    
+    let mounted = true;
+    (async () => {
+      try {
+        // coba baca dari key baru
+        let value = await AsyncStorage.getItem('totalSessions');
+
+        // migrasi dari key lama jika ada
+        if (value == null) {
+          const legacy = await AsyncStorage.getItem('focus_sessions');
+          if (legacy != null) {
+            value = legacy;
+            await AsyncStorage.setItem('totalSessions', legacy);
+            await AsyncStorage.removeItem('focus_sessions');
+          }
+        }
+
+        const n = parseInt(value ?? '0', 10);
+        if (mounted) setSessions(Number.isNaN(n) ? 0 : n);
+      } catch (e) {
+        console.log('Gagal load sessions:', e);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // 🔹 Simpan sessions setiap kali berubah (ke key baru)
+  useEffect(() => {
+    AsyncStorage.setItem('totalSessions', String(sessions)).catch(e =>
+      console.log('Gagal simpan sessions:', e)
+    );
+  }, [sessions]);
+
+  // 🔹 Animasi awal
+  useEffect(() => {
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 1000,
+      useNativeDriver: true,
+    }).start();
+
+    Animated.loop(
+      Animated.timing(rotateAnim, {
+        toValue: 1,
+        duration: 20000,
+        useNativeDriver: true,
+      })
+    ).start();
+
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.1,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, []);
+
+  // 🔹 Timer detik
+  useEffect(() => {
+    let interval: NodeJS.Timeout | undefined;
     if (isBreathing) {
       interval = setInterval(() => {
         setTimer(prev => prev + 1);
       }, 1000);
     }
-
     return () => {
       if (interval) clearInterval(interval);
     };
   }, [isBreathing]);
 
+  // 🔹 Perpindahan fase napas
   useEffect(() => {
-    let breathInterval: NodeJS.Timeout;
-    
+    let breathInterval: NodeJS.Timeout | undefined;
     if (isBreathing) {
       breathInterval = setInterval(() => {
         setBreathPhase(prev => {
@@ -44,13 +120,43 @@ export default function FocusTab() {
             default: return 'inhale';
           }
         });
-      }, 4000); // 4 seconds per phase
+      }, 4000);
     }
-
     return () => {
       if (breathInterval) clearInterval(breathInterval);
     };
   }, [isBreathing]);
+
+  // 🔹 Animasi sesuai fase
+  useEffect(() => {
+    if (isBreathing) {
+      const scale = getCircleScale();
+      Animated.timing(circleAnim, {
+        toValue: scale,
+        duration: 4000,
+        useNativeDriver: true,
+      }).start();
+
+      const glowIntensity = breathPhase === 'hold' ? 1 : 0.6;
+      Animated.timing(glowAnim, {
+        toValue: glowIntensity,
+        duration: 2000,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.timing(circleAnim, {
+        toValue: 1,
+        duration: 1000,
+        useNativeDriver: true,
+      }).start();
+
+      Animated.timing(glowAnim, {
+        toValue: 0,
+        duration: 500,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [breathPhase, isBreathing]);
 
   const startBreathingSession = () => {
     setIsBreathing(true);
@@ -66,7 +172,7 @@ export default function FocusTab() {
     setIsBreathing(false);
     setTimer(0);
     setBreathPhase('inhale');
-    setSessions(prev => prev + 1);
+    setSessions(prev => prev + 1); // tersimpan via useEffect
   };
 
   const formatTime = (seconds: number) => {
@@ -77,283 +183,283 @@ export default function FocusTab() {
 
   const getBreathInstruction = () => {
     switch (breathPhase) {
-      case 'inhale': return 'Tarik Napas Dalam';
-      case 'hold': return 'Tahan';
-      case 'exhale': return 'Hembuskan Perlahan';
-      default: return 'Bersiap';
+      case 'inhale': return 'TARIK NAPAS DALAM';
+      case 'hold': return 'TAHAN';
+      case 'exhale': return 'HEMBUSKAN PERLAHAN';
+      default: return 'BERSIAP';
     }
   };
 
   const getCircleScale = () => {
     switch (breathPhase) {
-      case 'inhale': return 1.2;
-      case 'hold': return 1.2;
-      case 'exhale': return 0.8;
+      case 'inhale': return 1.4;
+      case 'hold': return 1.4;
+      case 'exhale': return 0.7;
       default: return 1;
     }
   };
 
+  const getPhaseColor = () => {
+    switch (breathPhase) {
+      case 'inhale': return ['#00F260', '#0575E6'];
+      case 'hold': return ['#FFD700', '#FF6B6B'];
+      case 'exhale': return ['#A8E6CF', '#88D8C0'];
+      default: return ['#667eea', '#764ba2'];
+    }
+  };
+
+  const spin = rotateAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
   return (
     <LinearGradient
-      colors={['#a8e6cf', '#dcedc1', '#ffd3a5']}
+      colors={['#0F0C29', '#24243e', '#313164', '#2B1B69']}
+      locations={[0, 0.3, 0.7, 1]}
       style={styles.container}
     >
-      <View style={styles.content}>
-        {/* Header */}
+      {/* Floating Background Elements */}
+      <View style={styles.backgroundElements}>
+        <Animated.View style={[styles.floatingElement, { top: '15%', left: '10%', transform: [{ rotate: spin }] }]}>
+          <Brain size={24} color="rgba(255,255,255,0.08)" />
+        </Animated.View>
+        <Animated.View style={[styles.floatingElement, { top: '70%', right: '15%', transform: [{ rotate: spin }] }]}>
+          <Waves size={20} color="rgba(255,255,255,0.06)" />
+        </Animated.View>
+        <Animated.View style={[styles.floatingElement, { top: '40%', right: '8%', transform: [{ rotate: spin }] }]}>
+          <Activity size={18} color="rgba(255,255,255,0.05)" />
+        </Animated.View>
+      </View>
+
+      <Animated.View style={[styles.content, { opacity: fadeAnim }]}>
+        {/* Holographic Header */}
         <View style={styles.header}>
-          <Text style={styles.title}>Pusat Fokus</Text>
-          <Text style={styles.subtitle}>Latihan pernapasan untuk ketenangan pikiran</Text>
-        </View>
-
-        {/* Breathing Circle */}
-        <View style={styles.breathingContainer}>
-          <View
-            style={[
-              styles.breathingCircle,
-              {
-                transform: [{ scale: isBreathing ? getCircleScale() : 1 }],
-              },
-            ]}
+          <LinearGradient
+            colors={['rgba(255,255,255,0.15)', 'rgba(255,255,255,0.05)']}
+            style={styles.headerContainer}
           >
-            <Text style={styles.breathInstruction}>
-              {isBreathing ? getBreathInstruction() : 'Siap Memulai'}
-            </Text>
-          </View>
+            <Text style={styles.title}>PUSAT FOKUS</Text>
+            <View style={styles.subtitleContainer}>
+              <View style={styles.glowLine} />
+              <Text style={styles.subtitle}>NEURAL BREATHING PROTOCOL</Text>
+              <View style={styles.glowLine} />
+            </View>
+          </LinearGradient>
         </View>
 
-        {/* Timer */}
-        <Text style={styles.timer}>{formatTime(timer)}</Text>
+        {/* Quantum Breathing Circle */}
+        <View style={styles.breathingContainer}>
+          <Animated.View style={[styles.outerRing1, { transform: [{ scale: pulseAnim }] }]} />
+          <Animated.View style={[styles.outerRing2, { transform: [{ scale: pulseAnim }, { rotate: spin }] }]} />
+          <Animated.View style={[styles.outerRing3, { transform: [{ rotate: spin }] }]} />
 
-        {/* Phase Indicator */}
+          <Animated.View style={[
+            styles.breathingCircle,
+            { transform: [{ scale: circleAnim }] }
+          ]}>
+            <LinearGradient
+              colors={getPhaseColor()}
+              style={styles.circleGradient}
+            >
+              <View style={styles.circleInner}>
+                <Text style={styles.breathInstruction}>
+                  {isBreathing ? getBreathInstruction() : 'SIAP MEMULAI'}
+                </Text>
+                <View style={styles.centerDot} />
+              </View>
+            </LinearGradient>
+
+            {/* Glow Effect */}
+            <Animated.View style={[
+              styles.circleGlow,
+              { opacity: glowAnim }
+            ]} />
+          </Animated.View>
+        </View>
+
+        {/* Holographic Timer */}
+        <View style={styles.timerContainer}>
+          <Text style={styles.timer}>{formatTime(timer)}</Text>
+          <View style={styles.timerGlow} />
+        </View>
+
+        {/* Quantum Phase Indicators */}
         {isBreathing && (
           <View style={styles.phaseContainer}>
-            <View style={[styles.phaseDot, breathPhase === 'inhale' && styles.activeDot]} />
-            <View style={[styles.phaseDot, breathPhase === 'hold' && styles.activeDot]} />
-            <View style={[styles.phaseDot, breathPhase === 'exhale' && styles.activeDot]} />
+            <View style={[styles.phaseDot, breathPhase === 'inhale' && styles.activeDot]}>
+              {breathPhase === 'inhale' && <View style={styles.dotGlow} />}
+            </View>
+            <View style={styles.phaseConnector} />
+            <View style={[styles.phaseDot, breathPhase === 'hold' && styles.activeDot]}>
+              {breathPhase === 'hold' && <View style={styles.dotGlow} />}
+            </View>
+            <View style={styles.phaseConnector} />
+            <View style={[styles.phaseDot, breathPhase === 'exhale' && styles.activeDot]}>
+              {breathPhase === 'exhale' && <View style={styles.dotGlow} />}
+            </View>
           </View>
         )}
 
-        {/* Controls */}
+        {/* Cyberpunk Controls */}
         <View style={styles.controlsContainer}>
           {!isBreathing ? (
             <TouchableOpacity
-              style={[styles.controlButton, styles.playButton]}
+              style={styles.playButton}
               onPress={startBreathingSession}
               activeOpacity={0.8}
             >
-              <Play size={24} color="#FFFFFF" />
-              <Text style={styles.buttonText}>Mulai Latihan</Text>
+              <LinearGradient
+                colors={['#00F260', '#0575E6']}
+                style={styles.buttonGradient}
+              >
+                <Play size={28} color="#FFFFFF" />
+                <Text style={styles.buttonText}>MULAI LATIHAN</Text>
+                <View style={styles.buttonGlow} />
+              </LinearGradient>
             </TouchableOpacity>
           ) : (
             <View style={styles.activeControls}>
               <TouchableOpacity
-                style={[styles.controlButton, styles.pauseButton]}
+                style={styles.controlButton}
                 onPress={pauseSession}
                 activeOpacity={0.8}
               >
-                <Pause size={20} color="#FFFFFF" />
-                <Text style={styles.smallButtonText}>Jeda</Text>
+                <LinearGradient
+                  colors={['#FFD700', '#FF6B6B']}
+                  style={styles.smallButtonGradient}
+                >
+                  <Pause size={20} color="#FFFFFF" />
+                  <Text style={styles.smallButtonText}>JEDA</Text>
+                </LinearGradient>
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[styles.controlButton, styles.resetButton]}
+                style={styles.controlButton}
                 onPress={resetSession}
                 activeOpacity={0.8}
               >
-                <RotateCcw size={20} color="#FFFFFF" />
-                <Text style={styles.smallButtonText}>Selesai</Text>
+                <LinearGradient
+                  colors={['#FC466B', '#3F5EFB']}
+                  style={styles.smallButtonGradient}
+                >
+                  <RotateCcw size={20} color="#FFFFFF" />
+                  <Text style={styles.smallButtonText}>SELESAI</Text>
+                </LinearGradient>
               </TouchableOpacity>
             </View>
           )}
         </View>
 
-        {/* Stats */}
-        <View style={styles.statsContainer}>
+        {/* Neural Stats Dashboard */}
+        <LinearGradient
+          colors={['rgba(255,255,255,0.1)', 'rgba(255,255,255,0.05)']}
+          style={styles.statsContainer}
+        >
           <View style={styles.statItem}>
+            <View style={styles.statIconContainer}>
+              <Zap size={24} color="#00F260" />
+              <View style={styles.statIconGlow} />
+            </View>
             <Text style={styles.statNumber}>{sessions}</Text>
-            <Text style={styles.statLabel}>Sesi Hari Ini</Text>
+            <Text style={styles.statLabel}>SESI TOTAL</Text>
           </View>
-          <View style={styles.statItem}>
-            <Volume2 size={20} color="#64748B" />
-            <Text style={styles.statLabel}>Audio Tenang</Text>
-          </View>
-        </View>
 
-        {/* Tips */}
-        <View style={styles.tipsContainer}>
-          <Text style={styles.tipsTitle}>💡 Tips Fokus</Text>
-          <Text style={styles.tipsText}>
-            • Lakukan latihan ini saat merasa terdistraksi{'\n'}
-            • Fokus pada gerakan lingkaran dan ikuti ritmenya{'\n'}
-            • 5-10 menit sudah cukup untuk menenangkan pikiran
-          </Text>
-        </View>
-      </View>
+          <View style={styles.statDivider} />
+
+          <View style={styles.statItem}>
+            <View style={styles.statIconContainer}>
+              <Volume2 size={24} color="#0575E6" />
+              <View style={styles.statIconGlow} />
+            </View>
+            <Text style={styles.statLabel2}>AUDIO NEURAL</Text>
+            <Text style={styles.statSubtext}>AKTIF</Text>
+          </View>
+        </LinearGradient>
+
+        
+      </Animated.View>
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    paddingTop: 60,
-    paddingHorizontal: 20,
-    alignItems: 'center',
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 40,
+  container: { flex: 1 },
+  backgroundElements: { position: 'absolute', width: '100%', height: '100%' },
+  floatingElement: { position: 'absolute' },
+  content: { flex: 1, paddingTop: 80, paddingHorizontal: 24, alignItems: 'center' },
+  header: { alignItems: 'center', marginBottom: 40 },
+  headerContainer: {
+    padding: 20, borderRadius: 20, alignItems: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
   },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#1F2937',
-    marginBottom: 8,
+    fontSize: 32, fontWeight: '900', color: '#FFFFFF', textAlign: 'center', letterSpacing: 3,
+    textShadowColor: 'rgba(255,255,255,0.3)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 10,
   },
-  subtitle: {
-    fontSize: 16,
-    color: '#6B7280',
-    textAlign: 'center',
+  subtitleContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 15 },
+  glowLine: {
+    width: 30, height: 1, backgroundColor: '#00F260', marginHorizontal: 12,
+    shadowColor: '#00F260', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 5,
   },
-  breathingContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 30,
-  },
-  breathingCircle: {
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: 'rgba(99, 102, 241, 0.2)',
-    borderWidth: 3,
-    borderColor: '#6366F1',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#6366F1',
-    shadowOffset: {
-      width: 0,
-      height: 8,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 8,
-  },
+  subtitle: { fontSize: 12, color: '#E2E8F0', textAlign: 'center', letterSpacing: 1, fontWeight: '600' },
+  breathingContainer: { alignItems: 'center', justifyContent: 'center', marginBottom: 40, position: 'relative' },
+  outerRing1: { position: 'absolute', width: 280, height: 280, borderRadius: 140, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  outerRing2: { position: 'absolute', width: 320, height: 320, borderRadius: 160, borderWidth: 1, borderColor: 'rgba(0, 242, 96, 0.2)', borderStyle: 'dashed' },
+  outerRing3: { position: 'absolute', width: 360, height: 360, borderRadius: 180, borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)' },
+  breathingCircle: { width: 220, height: 220, borderRadius: 110, position: 'relative' },
+  circleGradient: { width: '100%', height: '100%', borderRadius: 110, padding: 3 },
+  circleInner: { flex: 1, borderRadius: 107, backgroundColor: 'rgba(15, 12, 41, 0.8)', alignItems: 'center', justifyContent: 'center', position: 'relative' },
   breathInstruction: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#6366F1',
-    textAlign: 'center',
+    fontSize: 16, fontWeight: '700', color: '#FFFFFF', textAlign: 'center', letterSpacing: 1,
+    textShadowColor: 'rgba(255,255,255,0.5)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 5,
   },
+  centerDot: {
+    width: 8, height: 8, borderRadius: 4, backgroundColor: '#00F260', marginTop: 10,
+    shadowColor: '#00F260', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 5,
+  },
+  circleGlow: { position: 'absolute', top: -20, left: -20, right: -20, bottom: -20, borderRadius: 130, backgroundColor: '#00F260', opacity: 0.2 },
+  timerContainer: { position: 'relative', marginBottom: 30 },
   timer: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: '#1F2937',
-    marginBottom: 20,
+    fontSize: 48, fontWeight: '900', color: '#FFFFFF',
+    textShadowColor: 'rgba(255,255,255,0.5)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 10,
   },
-  phaseContainer: {
-    flexDirection: 'row',
-    marginBottom: 30,
-  },
-  phaseDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#D1D5DB',
-    marginHorizontal: 4,
-  },
-  activeDot: {
-    backgroundColor: '#6366F1',
-  },
-  controlsContainer: {
-    width: '100%',
-    alignItems: 'center',
-    marginBottom: 30,
-  },
-  activeControls: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    width: '100%',
-  },
-  controlButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  playButton: {
-    backgroundColor: '#10B981',
-    width: '100%',
-  },
-  pauseButton: {
-    backgroundColor: '#F59E0B',
-    flex: 0.45,
-  },
-  resetButton: {
-    backgroundColor: '#EF4444',
-    flex: 0.45,
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  smallButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 6,
-  },
+  timerGlow: { position: 'absolute', top: -10, left: -20, right: -20, bottom: -10, backgroundColor: '#FFFFFF', opacity: 0.05, borderRadius: 10 },
+  phaseContainer: { flexDirection: 'row', alignItems: 'center', marginBottom: 40 },
+  phaseDot: { width: 16, height: 16, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.2)', position: 'relative', alignItems: 'center', justifyContent: 'center' },
+  activeDot: { backgroundColor: '#00F260', shadowColor: '#00F260', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 1, shadowRadius: 10 },
+  dotGlow: { position: 'absolute', width: 24, height: 24, borderRadius: 12, backgroundColor: '#00F260', opacity: 0.3 },
+  phaseConnector: { width: 40, height: 2, backgroundColor: 'rgba(255,255,255,0.1)', marginHorizontal: 8 },
+  controlsContainer: { width: '100%', alignItems: 'center', marginBottom: 40 },
+  playButton: { width: '100%', borderRadius: 15, overflow: 'hidden' },
+  buttonGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 20, position: 'relative' },
+  buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700', marginLeft: 12, letterSpacing: 1 },
+  buttonGlow: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: '#FFFFFF', opacity: 0.1 },
+  activeControls: { flexDirection: 'row', justifyContent: 'space-between', width: '100%' },
+  controlButton: { flex: 0.48, borderRadius: 12, overflow: 'hidden' },
+  smallButtonGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 16 },
+  smallButtonText: { color: '#FFFFFF', fontSize: 14, fontWeight: '600', marginLeft: 8, letterSpacing: 0.5 },
   statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    width: '100%',
-    backgroundColor: 'rgba(255, 255, 255, 0.7)',
-    borderRadius: 15,
-    padding: 20,
-    marginBottom: 20,
+    flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', width: '100%',
+    borderRadius: 20, padding: 25, marginBottom: 30, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
   },
-  statItem: {
-    alignItems: 'center',
-  },
+  statItem: { alignItems: 'center', flex: 1 },
+  statIconContainer: { position: 'relative', marginBottom: 10 },
+  statIconGlow: { position: 'absolute', top: -5, left: -5, right: -5, bottom: -5, backgroundColor: '#00F260', borderRadius: 20, opacity: 0.2 },
   statNumber: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#1F2937',
+    fontSize: 28, fontWeight: '900', color: '#FFFFFF',
+    textShadowColor: 'rgba(255,255,255,0.3)', textShadowOffset: { width: 0, height: 0 }, textShadowRadius: 5,
   },
-  statLabel: {
-    fontSize: 14,
-    color: '#6B7280',
-    marginTop: 4,
-  },
+  statLabel: { fontSize: 12, color: '#E2E8F0', fontWeight: '600', letterSpacing: 0.5, marginTop: 4 },
+  statLabel2: { fontSize: 12, color: '#E2E8F0', fontWeight: '600', letterSpacing: 0.5 },
+  statSubtext: { fontSize: 10, color: '#00F260', fontWeight: '500', marginTop: 2 },
+  statDivider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.1)', marginHorizontal: 20 },
   tipsContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.8)',
-    borderRadius: 15,
-    padding: 20,
-    width: '100%',
+    width: '100%', borderRadius: 20, padding: 25, borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)', position: 'relative',
   },
-  tipsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2937',
-    marginBottom: 8,
-  },
-  tipsText: {
-    fontSize: 14,
-    color: '#4B5563',
-    lineHeight: 20,
-  },
+  tipsHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 15 },
+  tipsTitle: { fontSize: 14, fontWeight: '700', color: '#FFFFFF', marginLeft: 10, letterSpacing: 1 },
+  tipsText: { fontSize: 13, color: '#E2E8F0', lineHeight: 22, fontWeight: '400' },
+  tipsGlow: { position: 'absolute', top: -5, left: -5, right: -5, bottom: -5, backgroundColor: '#00F260', borderRadius: 25, opacity: 0.05 },
 });
